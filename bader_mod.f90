@@ -244,6 +244,7 @@ MODULE bader_mod
     DO n1 = 1, chgval%npts(1)
       DO n2 = 1, chgval%npts(2)
         DO n3 = 1, chgval%npts(3)
+          IF (bdr%volnum(n1,n2,n3) <= 0) CYCLE
           IF (bdr%volnum(n1,n2,n3) == bdr%nvols+1) CYCLE
           !$acc atomic
           bdr%volchg(bdr%volnum(n1,n2,n3)) = &
@@ -258,6 +259,7 @@ MODULE bader_mod
     DO n1 = 1, chgval%npts(1)
       DO n2 = 1, chgval%npts(2)
         DO n3 = 1, chgval%npts(3)
+          IF (bdr%volnum(n1,n2,n3) <= 0) CYCLE
           IF (bdr%volnum(n1,n2,n3) == bdr%nvols+1) CYCLE
           !$OMP ATOMIC
           bdr%volchg(bdr%volnum(n1,n2,n3)) = &

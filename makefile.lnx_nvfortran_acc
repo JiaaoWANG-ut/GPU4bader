@@ -1,0 +1,44 @@
+.SUFFIXES: .f90
+
+NVHPC_VER ?= 25.1
+NVHPC_ROOT ?= /opt/nvidia/hpc_sdk/Linux_x86_64/$(NVHPC_VER)
+FC = $(NVHPC_ROOT)/compilers/bin/nvfortran
+
+# OpenACC GPU build (NVIDIA HPC SDK)
+# -D_OPENACC enables #ifdef _OPENACC branches in source.
+# -Mpreprocess enables preprocessing for .f90 files.
+# -mp keeps OpenMP code paths available where present.
+FFLAGS = -O3 -Minfo=accel -acc -gpu=cc80,cuda12.6 -mp -Mpreprocess
+FFLAGS_F77 = -O3 -Minfo=accel -acc -gpu=cc80,cuda12.6 -mp
+
+LINK = -acc -gpu=cc80,cuda12.6 -mp
+
+OBJS = kind_mod.o       \
+       matrix_mod.o     \
+       ions_mod.o       \
+       options_mod.o    \
+       charge_mod.o     \
+       chgcar_mod.o     \
+       cube_mod.o       \
+       io_mod.o         \
+       bader_mod.o      \
+       voronoi_mod.o    \
+       multipole_mod.o  \
+       weight_mod.o     \
+       dsyevj3_mod.o    \
+       jacobi_mod.o     \
+       critpoint_mod.o  \
+       automatedcp_mod.o
+
+bader: $(OBJS) main.o
+	rm -f bader
+	$(FC) $(LINK) main.o -o $@ $(OBJS)
+
+%.o %.mod : %.f90
+	$(FC) $(FFLAGS) -c $*.f90
+
+dsyevj3_mod.o : dsyevj3_mod.f
+	$(FC) $(FFLAGS_F77) -c dsyevj3_mod.f
+
+clean:
+	rm -f *.o *.mod bader

@@ -91,6 +91,17 @@ All performance-critical subroutines (`rho_val`, `rho_grad`, `rho_grad_dir`, `pb
 
 `INTENT(IN)` was added to function arguments in `rho_val`, `rho_grad_dir`, and `pbc` to give the compiler stronger aliasing guarantees for optimization.
 
+### 7. GPU Branch Infrastructure (`gpu-optimization`)
+
+This branch adds a dedicated NVIDIA OpenACC build and runtime entrypoint:
+
+- `makefile.lnx_nvfortran_acc`: OpenACC build with NVIDIA HPC SDK (`nvfortran`)
+- `run_gpu.sh`: one-command launcher for OpenACC runs with controlled runtime env
+  - supports `nvidia`, `host`, and `multicore` device types
+  - configures `LD_LIBRARY_PATH`, `ACC_DEVICE_TYPE`, `ACC_DEVICE_NUM`
+
+An additional safety guard was added in the OpenACC charge integration loop to skip non-positive basin IDs before indexing `volchg`, preventing invalid memory indexing on accelerator paths.
+
 ---
 
 ## Benchmark Results
@@ -105,6 +116,20 @@ All performance-critical subroutines (`rho_val`, `rho_grad`, `rho_grad_dir`, `pb
 | Bader partitioning + refinement | 25.35 s | 14.78 s | **1.7x** |
 | Minimum distance | 2.19 s | 0.20 s | **10.9x** |
 | **Total wall time** | **30.0 s** | **17.0 s** | **1.8x** |
+
+### GPU-Optimization Branch Benchmark (NaCl, 160x160x160)
+
+| Build / Mode | Command | Result |
+|---|---|---|
+| `gfortran` optimized CPU baseline | `OMP_NUM_THREADS=4 ../bader/bader CHG_NaCl` | **15.44 s** total |
+| `nvfortran` OpenACC host fallback | `../bader/run_gpu.sh CHG_NaCl host 0` | 24.08 s total |
+| `nvfortran` OpenACC NVIDIA device | `../bader/run_gpu.sh CHG_NaCl nvidia 0` | **runtime failed** (`cuInit error 34`) |
+
+Observed conclusion on this machine:
+
+- CPU baseline currently outperforms OpenACC host fallback for this workload.
+- GPU code generation is successful (OpenACC kernels are emitted by `nvfortran`), but runtime GPU initialization fails due to environment-level CUDA initialization (`cuInit`) failure.
+- Once GPU runtime access is fixed, re-run `run_gpu.sh ... nvidia` to obtain true GPU speed numbers.
 
 ### Correctness Verification
 
@@ -255,6 +280,13 @@ cd bader
 make -f makefile.lnx_gfortran_opt
 ```
 
+### NVIDIA OpenACC Build (GPU branch)
+
+```bash
+cd bader
+make -f makefile.lnx_nvfortran_acc
+```
+
 ### Original Build (for comparison)
 
 ```bash
@@ -284,6 +316,19 @@ OMP_NUM_THREADS=4 ./bader CHGCAR
 ./bader -m neargrid CHGCAR    # default
 ./bader -m ongrid CHGCAR      # faster per step
 ./bader -m offgrid CHGCAR     # most accurate
+```
+
+### OpenACC Launcher
+
+```bash
+# NVIDIA GPU (requires working CUDA runtime access)
+./run_gpu.sh ../NaCl/CHG_NaCl nvidia 0
+
+# Host fallback mode (OpenACC runtime on CPU)
+./run_gpu.sh ../NaCl/CHG_NaCl host 0
+
+# Multicore OpenACC mode
+./run_gpu.sh ../NaCl/CHG_NaCl multicore 0
 ```
 
 ### Output Files
