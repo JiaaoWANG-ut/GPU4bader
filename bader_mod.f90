@@ -64,7 +64,7 @@ MODULE bader_mod
     TYPE(options_obj) :: opts
 
     INTEGER, DIMENSION(3) :: p, ptemp
-    INTEGER :: n1, n2, n3, i, path_volnum, tenths_done, vid
+    INTEGER :: n1, n2, n3, i, path_volnum, tenths_done
     INTEGER :: cr, count_max, t1, t2
     INTEGER :: ref_itrs = 1
 
@@ -74,7 +74,6 @@ MODULE bader_mod
     TYPE(ions_obj) :: ionstemp
 
     INTEGER, ALLOCATABLE :: sc_atom_map(:)
-    INTEGER, ALLOCATABLE, DIMENSION(:,:,:,:) :: attractor
     TYPE(ions_obj) :: ionsscell
     TYPE(charge_obj) :: chgscell
 
@@ -148,96 +147,53 @@ MODULE bader_mod
     bdr%vacchg = bdr%vacchg/REAL(chgval%nrho,q2)
     bdr%vacvol = bdr%vacvol*vol/chgval%nrho
 
-    ! Phase A: Parallel gradient ascent -- each grid point traces independently
-    ALLOCATE(attractor(3, chgval%npts(1), chgval%npts(2), chgval%npts(3)))
-    attractor = 0
-
-#ifdef _OPENACC
-    !$acc data copyin(chgtemp, chgtemp%rho, chgtemp%car2lat, chgtemp%lat2car, &
-    !$acc&            chgtemp%lat_i_dist, chgtemp%lat_dist) &
-    !$acc&     copyin(bdr%volnum) copy(attractor)
-    !$acc parallel loop collapse(3) private(p, ptemp)
-    DO n1 = 1, chgval%npts(1)
-      DO n2 = 1, chgval%npts(2)
-        DO n3 = 1, chgval%npts(3)
-          IF (bdr%volnum(n1,n2,n3) /= 0) CYCLE
-          p = (/n1, n2, n3/)
-          IF (opts%bader_opt == opts%bader_offgrid) THEN
-            CALL trace_offgrid(chgtemp, bdr%stepsize, p, ptemp)
-          ELSEIF (opts%bader_opt == opts%bader_ongrid) THEN
-            CALL trace_ongrid(chgtemp, p, ptemp)
-          ELSE
-            CALL trace_neargrid(chgtemp, p, ptemp)
-          END IF
-          attractor(:, n1, n2, n3) = ptemp
-        END DO
-      END DO
-    END DO
-    !$acc end parallel loop
-    !$acc end data
-#else
-    !$OMP PARALLEL DO COLLAPSE(2) PRIVATE(n2, n3, p, ptemp) &
-    !$OMP& SCHEDULE(dynamic, 4) DEFAULT(SHARED)
-    DO n1 = 1, chgval%npts(1)
-      DO n2 = 1, chgval%npts(2)
-        DO n3 = 1, chgval%npts(3)
-          IF (bdr%volnum(n1,n2,n3) /= 0) CYCLE
-          p = (/n1, n2, n3/)
-          IF (opts%bader_opt == opts%bader_offgrid) THEN
-            CALL trace_offgrid(chgtemp, bdr%stepsize, p, ptemp)
-          ELSEIF (opts%bader_opt == opts%bader_ongrid) THEN
-            CALL trace_ongrid(chgtemp, p, ptemp)
-          ELSE
-            CALL trace_neargrid(chgtemp, p, ptemp)
-          END IF
-          attractor(:, n1, n2, n3) = ptemp
-        END DO
-      END DO
-    END DO
-    !$OMP END PARALLEL DO
-#endif
-
-    WRITE(*,'(A,$)') '** ** ** ** ** **'
-
-    ! Phase B: Canonicalize attractors into basin IDs (serial, fast)
-    DO n1 = 1, chgval%npts(1)
-      DO n2 = 1, chgval%npts(2)
-        DO n3 = 1, chgval%npts(3)
-          IF (bdr%volnum(n1,n2,n3) /= 0) CYCLE
-          ptemp = attractor(:, n1, n2, n3)
-          vid = bdr%volnum(ptemp(1), ptemp(2), ptemp(3))
-          IF (vid > 0) THEN
-            bdr%volnum(n1, n2, n3) = vid
-          ELSE
-            IF (bdr%bnum >= bdr%bdim) THEN
-              CALL reallocate_volpos(bdr, bdr%bdim*2)
+    tenths_done = 0
+    DO n1=1,chgval%npts(1)
+      IF ((n1*10/chgval%npts(1)) > tenths_done) THEN
+        tenths_done = (n1*10/chgval%npts(1))
+        WRITE(*,'(A,$)') '**'
+      END IF
+      DO n2=1,chgval%npts(2)
+        DO n3=1,chgval%npts(3)
+          p = (/n1,n2,n3/)
+          IF (bdr%volnum(p(1),p(2),p(3)) == 0) THEN
+            IF (opts%bader_opt == opts%bader_offgrid) THEN
+              CALL max_offgrid(bdr,chgtemp,p)
+            ELSEIF (opts%bader_opt == opts%bader_ongrid) THEN
+              CALL max_ongrid(bdr,chgtemp,p)
+            ELSE
+              CALL max_neargrid(bdr,chgtemp,opts,p)
             END IF
-            bdr%bnum = bdr%bnum + 1
-            bdr%volpos_lat(bdr%bnum,:) = REAL(ptemp, q2)
-            bdr%volnum(ptemp(1), ptemp(2), ptemp(3)) = bdr%bnum
-            bdr%volnum(n1, n2, n3) = bdr%bnum
+            path_volnum = bdr%volnum(p(1),p(2),p(3))
+
+            IF (path_volnum == 0) THEN
+              IF (bdr%bnum >= bdr%bdim) THEN
+                CALL reallocate_volpos(bdr,bdr%bdim*2)
+              END IF
+              bdr%bnum = bdr%bnum+1
+              path_volnum = bdr%bnum
+              bdr%volpos_lat(bdr%bnum,:) = REAL(p,q2)
+            END IF
+
+            DO i = 1,bdr%pnum
+              ptemp = (/bdr%path(i,1),bdr%path(i,2),bdr%path(i,3)/)
+              IF(bdr%volnum(ptemp(1),ptemp(2),ptemp(3)) /= -1) THEN
+                bdr%volnum(ptemp(1),ptemp(2),ptemp(3)) = path_volnum
+              END IF
+              IF (opts%bader_opt /= opts%bader_ongrid) THEN
+                IF (bdr%known(ptemp(1),ptemp(2),ptemp(3)) /= 2) THEN
+                  bdr%known(ptemp(1),ptemp(2),ptemp(3)) = 0
+                END IF
+              END IF
+              IF (opts%quit_opt==opts%quit_known .AND. opts%bader_opt/=opts%bader_ongrid) THEN
+                CALL assign_surrounding_pts(bdr,chgtemp,ptemp)
+              END IF
+            END DO
+
           END IF
         END DO
       END DO
     END DO
-
-    DEALLOCATE(attractor)
-
-    ! Populate known array: mark interior points (all neighbors same volnum)
-    IF (opts%quit_opt == opts%quit_known .AND. opts%bader_opt /= opts%bader_ongrid) THEN
-      !$OMP PARALLEL DO COLLAPSE(2) PRIVATE(n2, n3, ptemp) SCHEDULE(static)
-      DO n1 = 1, chgval%npts(1)
-        DO n2 = 1, chgval%npts(2)
-          DO n3 = 1, chgval%npts(3)
-            IF (bdr%volnum(n1,n2,n3) <= 0) CYCLE
-            ptemp = (/n1, n2, n3/)
-            CALL known_volnum_ongrid2(bdr, chgtemp, ptemp)
-          END DO
-        END DO
-      END DO
-      !$OMP END PARALLEL DO
-    END IF
-
     WRITE(*,*) ''
 
     IF (opts%vac_flag) THEN
@@ -250,11 +206,18 @@ MODULE bader_mod
       END DO
     END IF
 
-    ! Parallel two-phase trace with on-grid snap converges to true maxima,
-    ! so edge refinement is not needed (would produce 0 reassignments).
-    ! Skip unless the user explicitly requested refinement iterations.
-    bdr%refine_edge_itrs = 0
-    IF (opts%refine_edge_itrs > 0) THEN
+    opts%refine_edge_itrs = 0
+    bdr%refine_edge_itrs = opts%refine_edge_itrs
+
+    IF(opts%refine_edge_itrs <= 0) THEN
+      WRITE(*,'(/,2x,A)') 'REFINING AUTOMATICALLY'
+      DO
+        WRITE(*,'(2x,A,I2)') 'ITERATION:',ref_itrs
+        CALL refine_edge(bdr,chgtemp,opts,ions,ref_itrs)
+        IF (bdr%refine_edge_itrs == 0) EXIT
+        ref_itrs = ref_itrs + 1
+      END DO
+    ELSEIF (opts%refine_edge_itrs > 0) THEN
       WRITE(*,'(/,2x,A)') 'REFINING EDGE'
       DO i=1,opts%refine_edge_itrs
         WRITE(*,'(2x,A,I2)') 'ITERATION:',i
@@ -802,33 +765,39 @@ MODULE bader_mod
     END IF
 
     num_reassign = 0
-    !$OMP PARALLEL DO COLLAPSE(2) PRIVATE(n2, n3, p, pt, bvolnum, path_volnum) &
-    !$OMP& SCHEDULE(dynamic, 4) REDUCTION(+:num_reassign) DEFAULT(SHARED)
     DO n1 = 1,chg%npts(1)
       DO n2 = 1,chg%npts(2)
         DO n3 = 1,chg%npts(3)
-          bvolnum = bdr%volnum(n1,n2,n3)
-          IF (bvolnum >= 0) CYCLE
           p = (/n1,n2,n3/)
-          IF (opts%bader_opt == opts%bader_offgrid) THEN
-            CALL trace_offgrid(chg, bdr%stepsize, p, pt)
-          ELSEIF (opts%bader_opt == opts%bader_ongrid) THEN
-            CALL trace_ongrid(chg, p, pt)
-          ELSE
-            CALL trace_neargrid(chg, p, pt)
-          END IF
-          path_volnum = bdr%volnum(pt(1),pt(2),pt(3))
-          IF (path_volnum <= 0) path_volnum = ABS(bvolnum)
-          bdr%volnum(n1,n2,n3) = path_volnum
-          IF (ABS(bvolnum) /= path_volnum) THEN
-            num_reassign = num_reassign + 1
-            IF(opts%refine_edge_itrs==-1 .OR. opts%refine_edge_itrs==-3) &
-              bdr%volnum(n1,n2,n3) = -path_volnum
+          bvolnum = bdr%volnum(n1,n2,n3)
+          IF (bvolnum<0) THEN
+            IF (opts%bader_opt == opts%bader_offgrid) THEN
+              CALL max_offgrid(bdr,chg,p)
+            ELSEIF (opts%bader_opt == opts%bader_ongrid) THEN
+              CALL max_ongrid(bdr,chg,p)
+            ELSE
+              CALL max_neargrid(bdr,chg,opts,p)
+            END IF
+            path_volnum = bdr%volnum(p(1),p(2),p(3))
+            IF (path_volnum<0 .OR. path_volnum>bdr%bnum) THEN
+              WRITE(*,*) 'ERROR: should be no new maxima in edge refinement'
+            END IF
+            bdr%volnum(n1,n2,n3) = path_volnum
+            IF (ABS(bvolnum) /= path_volnum) THEN
+              num_reassign = num_reassign + 1
+              IF(opts%refine_edge_itrs==-1 .OR. opts%refine_edge_itrs==-3) &
+                bdr%volnum(n1,n2,n3) = -path_volnum
+            END IF
+            DO i = 1,bdr%pnum
+              pt = (/bdr%path(i,1),bdr%path(i,2),bdr%path(i,3)/)
+              IF (bdr%known(pt(1),pt(2),pt(3)) /= 2) THEN
+                bdr%known(pt(1),pt(2),pt(3)) = 0
+              END IF
+            END DO
           END IF
         END DO
       END DO
     END DO
-    !$OMP END PARALLEL DO
  
     WRITE(*,'(2x,A,1I8)') 'REASSIGNED POINTS:',num_reassign
 
