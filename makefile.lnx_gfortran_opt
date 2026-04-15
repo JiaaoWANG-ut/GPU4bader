@@ -1,0 +1,42 @@
+.SUFFIXES: .f90
+
+FC = gfortran
+
+FFLAGS = -O3 -march=native -funroll-loops -flto -fopenmp -cpp
+FFLAGS_F77 = -O3 -march=native -funroll-loops -flto -fopenmp
+
+LINK = -fopenmp -flto
+
+OBJS = kind_mod.o       \
+       matrix_mod.o     \
+       ions_mod.o       \
+       options_mod.o    \
+       charge_mod.o     \
+       chgcar_mod.o     \
+       cube_mod.o       \
+       io_mod.o         \
+       bader_mod.o      \
+       voronoi_mod.o    \
+       multipole_mod.o  \
+       weight_mod.o     \
+       dsyevj3_mod.o    \
+       jacobi_mod.o     \
+       critpoint_mod.o  \
+       automatedcp_mod.o
+
+bader: $(OBJS) main.o
+	rm -f bader
+	$(FC) $(LINK) main.o -o $@ $(OBJS)
+
+%.o %.mod : %.f90
+	$(FC) $(FFLAGS) -c $*.f90
+
+dsyevj3_mod.o : dsyevj3_mod.f
+	$(FC) $(FFLAGS_F77) -c dsyevj3_mod.f
+
+clean:
+	rm -f *.o *.mod bader
+
+dist: bader
+	tar -cf bader_lnx_opt.tar bader
+	gzip -9 bader_lnx_opt.tar
