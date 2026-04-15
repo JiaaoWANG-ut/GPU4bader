@@ -1,0 +1,19 @@
+# Build artifacts
+*.o
+*.mod
+bader
+*.tar.gz
+
+# Profiling
+gmon.out
+gprof.txt
+
+# Output files
+ACF.dat
+BCF.dat
+AVF.dat
+AtIndex.dat
+BvIndex.dat
+Bvol*.dat
+BvAt*.dat
+BaderSurfaces.dat
