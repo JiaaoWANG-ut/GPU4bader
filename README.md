@@ -9,7 +9,7 @@ Wenjie Tang, Andri Arnaldsson, Wenrui Chai, Samuel T. Chill, and Graeme Henkelma
 (University of Texas at Austin)
 
 **Optimization work:**
-Performance engineering applied to compiler flags, numerical kernels, and parallelization.
+Jiaao Wang (The University of Texas at Austin) -- performance engineering applied to compiler flags, numerical kernels, and parallelization.
 
 ## References
 
